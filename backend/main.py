@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Any, Dict
 from contextlib import asynccontextmanager
+import threading
 
 from sse_starlette.sse import EventSourceResponse
 from fastapi import FastAPI, HTTPException
@@ -17,6 +18,20 @@ from document_processor.file_handler import DocumentProcessor
 from retriever.builder import RetrieverBuilder
 from agents.workflow import AgentWorkflow
 
+# ----------------------------
+# Built-in docs (dropdown-only mode)
+# ----------------------------
+EXAMPLES_DIR = Path("examples")
+
+_DOC_IDS: List[str] = []
+_DOC_PATHS: Dict[str, str] = {}              # doc_id -> absolute path
+_RETRIEVER_BY_DOC: Dict[str, Any] = {}       # doc_id -> retriever
+_DOC_FP: Dict[str, str] = {}                 # doc_id -> fingerprint (mtime+size path)
+
+# Prevent duplicate retriever builds under concurrent traffic
+_RETRIEVER_LOCK = threading.Lock()
+
+_APP_START_TS = time.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,18 +40,27 @@ async def lifespan(app: FastAPI):
     _load_builtin_docs()
     yield
     # --- shutdown ---
-    # optional: cleanup if you want (not required)
+    # optional cleanup:
     # _RETRIEVER_BY_DOC.clear()
 
 # ----------------------------
 # App + CORS
 # ----------------------------
-app = FastAPI(title="Agentic DocChat API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Agentic DocChat API", version="0.2.1", lifespan=lifespan)
+
+# CORS: set via env for prod safety
+# Example:
+#   export CORS_ORIGINS="https://yourdomain.com,http://localhost:3000"
+cors_env = os.getenv("CORS_ORIGINS", "*")
+if cors_env.strip() == "*":
+    allow_origins = ["*"]
+else:
+    allow_origins = [o.strip() for o in cors_env.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # dev-friendly (tighten in prod)
-    allow_credentials=True,
+    allow_origins=allow_origins,
+    allow_credentials=False if allow_origins == ["*"] else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -49,21 +73,10 @@ retriever_builder = RetrieverBuilder()
 workflow = AgentWorkflow()
 
 # ----------------------------
-# Built-in docs (dropdown-only mode)
-# ----------------------------
-EXAMPLES_DIR = Path("examples")
-
-_DOC_IDS: List[str] = []
-_DOC_PATHS: Dict[str, str] = {}              # doc_id -> absolute path
-_RETRIEVER_BY_DOC: Dict[str, Any] = {}       # doc_id -> retriever
-_DOC_FP: Dict[str, str] = {}                 # doc_id -> fingerprint (mtime+size path)
-
-
-# ----------------------------
-# Models (FastAPI uses these to render Swagger UI)
+# Models
 # ----------------------------
 class AskRequest(BaseModel):
-    question: str = Field(..., min_length=1, description="User question")
+    question: str = Field(..., min_length=1, max_length=4000, description="User question")
     doc_id: str = Field(..., min_length=1, description="Selected built-in PDF (filename from /api/docs)")
     top_k_sources: int = Field(default=5, ge=0, le=50, description="How many source chunks to return")
 
@@ -80,7 +93,6 @@ class AskResponse(BaseModel):
     verification_report: Optional[str] = None
     sources: List[SourceItem] = Field(default_factory=list)
 
-
 # ----------------------------
 # Helpers
 # ----------------------------
@@ -90,10 +102,7 @@ class LocalFile:
 
 
 def _fingerprint_path(path: str) -> str:
-    """
-    Fast fingerprint (safe enough for demo):
-    changes when file changes on disk (mtime/size), and includes path.
-    """
+    """Changes when file changes on disk (mtime/size), includes absolute path."""
     ap = os.path.abspath(path)
     st = os.stat(ap)
     h = hashlib.sha256()
@@ -104,10 +113,7 @@ def _fingerprint_path(path: str) -> str:
 
 
 def _load_builtin_docs() -> None:
-    """
-    Build the dropdown list from examples/*.pdf.
-    This does NOT build retrievers yet.
-    """
+    """Build dropdown list from examples/*.pdf. Does NOT build retrievers."""
     global _DOC_IDS, _DOC_PATHS, _DOC_FP
 
     pdfs = sorted(EXAMPLES_DIR.glob("*.pdf"))
@@ -116,73 +122,86 @@ def _load_builtin_docs() -> None:
     _DOC_FP = {p.name: _fingerprint_path(str(p.resolve())) for p in pdfs}
 
 
+def _validate_doc_id(doc_id: str) -> str:
+    """Only allow known doc IDs discovered from EXAMPLES_DIR."""
+    doc_id = (doc_id or "").strip()
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="Missing 'doc_id'")
+
+    # Refresh list in case PDFs were updated
+    _load_builtin_docs()
+
+    if doc_id not in _DOC_PATHS:
+        raise HTTPException(status_code=400, detail=f"Unknown doc_id: {doc_id}")
+
+    return doc_id
+
+
 def _ensure_doc_retriever(doc_id: str):
     """
     Build or reuse a retriever for a built-in doc.
-    Rebuild automatically if the underlying file changed.
-    Uses your DocumentProcessor caching (pkl) and should not interfere with it.
+    Rebuild automatically if underlying file changed.
     """
-    if doc_id not in _DOC_PATHS:
-        raise FileNotFoundError(f"Unknown doc_id: {doc_id}")
+    doc_id = _validate_doc_id(doc_id)
 
     path = _DOC_PATHS[doc_id]
     if not os.path.exists(path):
-        raise FileNotFoundError(f"File not found on server: {path}")
+        raise HTTPException(status_code=400, detail=f"File not found on server: {path}")
 
     fp = _fingerprint_path(path)
-    cached = _RETRIEVER_BY_DOC.get(doc_id)
 
-    # Reuse only if file hasn't changed
+    cached = _RETRIEVER_BY_DOC.get(doc_id)
     if cached is not None and _DOC_FP.get(doc_id) == fp:
         return cached
 
-    # Rebuild
-    files = [LocalFile(name=path)]
-    chunks = processor.process(files)  # uses your file_handler caching internally
+    # Lock to prevent multiple threads building same retriever at once
+    with _RETRIEVER_LOCK:
+        cached = _RETRIEVER_BY_DOC.get(doc_id)
+        if cached is not None and _DOC_FP.get(doc_id) == fp:
+            return cached
 
-    # Tag metadata (helps your Sources panel + filtering)
-    for c in chunks:
-        c.metadata = c.metadata or {}
-        c.metadata.update({"doc_id": doc_id, "source": doc_id})
+        files = [LocalFile(name=path)]
+        chunks = processor.process(files)  # your file_handler caching stays intact
 
-    # retriever = retriever_builder.build_hybrid_retriever(chunks)
-    retriever = retriever_builder.build_hybrid_retriever(chunks, collection_name=doc_id)
+        for c in chunks:
+            c.metadata = c.metadata or {}
+            c.metadata.update({"doc_id": doc_id, "source": doc_id})
 
-    _RETRIEVER_BY_DOC[doc_id] = retriever
-    _DOC_FP[doc_id] = fp
-    return retriever
+        # Keep your collection naming
+        retriever = retriever_builder.build_hybrid_retriever(chunks, collection_name=doc_id)
 
-
+        _RETRIEVER_BY_DOC[doc_id] = retriever
+        _DOC_FP[doc_id] = fp
+        return retriever
 
 # ----------------------------
 # Routes
 # ----------------------------
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "uptime_sec": int(time.time() - _APP_START_TS),
+        "docs_count": len(_DOC_IDS),
+        "cors_origins": allow_origins,
+    }
 
 
 @app.get("/api/docs")
 def list_docs():
-    """
-    Returns the list of built-in PDFs (dropdown choices).
-    Frontend should call this and allow user to pick doc_id.
-    """
-    # Refresh list in case you changed files while server is running
+    """Returns list of built-in PDFs (dropdown choices)."""
     _load_builtin_docs()
     return {"docs": _DOC_IDS}
 
 
 @app.post("/api/ask", response_model=AskResponse)
 def ask(payload: AskRequest):
-    question = payload.question.strip()
-    doc_id = payload.doc_id.strip()
+    question = (payload.question or "").strip()
+    doc_id = (payload.doc_id or "").strip()
     top_k_sources = payload.top_k_sources
 
     if not question:
         raise HTTPException(status_code=400, detail="Missing 'question'")
-    if not doc_id:
-        raise HTTPException(status_code=400, detail="Missing 'doc_id'")
 
     try:
         retriever = _ensure_doc_retriever(doc_id)
@@ -205,8 +224,8 @@ def ask(payload: AskRequest):
             sources=sources,
         )
 
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -215,17 +234,13 @@ def ask(payload: AskRequest):
 async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
     """
     SSE endpoint for the Next.js "Agent Trace" UI.
-
-    Frontend should call:
-      GET /api/ask/stream?question=...&doc_id=<filename.pdf>&top_k_sources=5
+    GET /api/ask/stream?question=...&doc_id=<filename.pdf>&top_k_sources=5
     """
     question = (question or "").strip()
     doc_id = (doc_id or "").strip()
 
     if not question:
         raise HTTPException(status_code=400, detail="Missing 'question'")
-    if not doc_id:
-        raise HTTPException(status_code=400, detail="Missing 'doc_id'")
 
     async def emit(agent: str, status: str, **extra):
         payload = {"agent": agent, "status": status, **extra}
@@ -234,7 +249,7 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
     async def event_gen():
         t0 = time.perf_counter()
 
-        # 1) relevance (placeholder event; your workflow does its own relevance step)
+        # 1) relevance (placeholder event)
         yield await emit("relevance", "running")
         await asyncio.sleep(0.05)
         yield await emit(
@@ -244,7 +259,7 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
             ms=int((time.perf_counter() - t0) * 1000),
         )
 
-        # 2) retrieval (build or reuse doc retriever)
+        # 2) retrieval
         yield await emit("retrieval", "running")
         t_retr = time.perf_counter()
         try:
@@ -260,7 +275,7 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
             ms=int((time.perf_counter() - t_retr) * 1000),
         )
 
-        # 3) research + 4) verify (inside full_pipeline)
+        # 3) research + 4) verify
         yield await emit("research", "running")
         yield await emit("verify", "running")
 
@@ -316,4 +331,3 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
             "X-Accel-Buffering": "no",
         },
     )
-

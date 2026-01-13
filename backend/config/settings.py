@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # Database settings
     CHROMA_DB_PATH: str = "./chroma_db"
-    CHROMA_COLLECTION_NAME: str = "documents"
+    CHROMA_COLLECTION_NAME: str = "doc_id"
 
     # Retrieval settings
     VECTOR_SEARCH_K: int = 10
