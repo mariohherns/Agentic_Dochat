@@ -95,7 +95,7 @@ function safeJsonParse(s: string) {
 }
 
 export default function Page() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
 
   const [question, setQuestion] = useState<string>("");
   const [topKSources, setTopKSources] = useState<number>(5);
