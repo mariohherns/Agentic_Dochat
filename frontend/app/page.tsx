@@ -350,13 +350,13 @@ export default function Page() {
               )}
 
               <div className="mt-4 text-xs text-[rgb(var(--fg)/0.65)]">
-                Backend playground:{" "}
-                <a
-                  className="underline decoration-[rgb(var(--accent)/0.5)] underline-offset-2 hover:text-[rgb(var(--accent))]"
-                  href={`${API_BASE}/docs`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                  Backend API (hosted on Oracle Cloud):{" "}
+                  <a
+                    className="underline decoration-[rgb(var(--accent)/0.5)] underline-offset-2 hover:text-[rgb(var(--accent))]"
+                    href={`${API_BASE}/docs`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                   {API_BASE}/docs
                 </a>
               </div>
