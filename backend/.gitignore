@@ -1,0 +1,71 @@
+# ===============================
+# Python bytecode & cache
+# ===============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ===============================
+# Virtual environments
+# ===============================
+.env
+.venv
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# ===============================
+# Environment variables
+# ===============================
+.env
+test/
+
+
+# ===============================
+# Installer logs
+# ===============================
+pip-log.txt
+pip-delete-this-directory.txt
+app.log
+
+# ===============================
+# Unit test / coverage reports
+# ===============================
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# ===============================
+# Logs & runtime files
+# ===============================
+*.log
+*.pid
+
+# ===============================
+# IDEs / Editors
+# ===============================
+.vscode/
+.idea/
+.spyderproject
+.spyproject
+*.sublime-workspace
+*.sublime-project
+
+# ===============================
+# OS-specific
+# ===============================
+.DS_Store
+Thumbs.db
+
+
+
