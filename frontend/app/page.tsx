@@ -95,7 +95,7 @@ function safeJsonParse(s: string) {
 }
 
 export default function Page() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
+  // const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
 
   const [question, setQuestion] = useState<string>("");
   const [topKSources, setTopKSources] = useState<number>(5);
@@ -123,7 +123,8 @@ export default function Page() {
 
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/docs`);
+        const res = await fetch(`/api/docs`);
+        // const res = await fetch(`${API_BASE}/api/docs`);
         if (!res.ok) throw new Error(`Failed to load docs: HTTP ${res.status}`);
         const data = (await res.json()) as { docs?: string[] };
         const list = Array.isArray(data?.docs) ? data.docs : [];
@@ -141,7 +142,8 @@ export default function Page() {
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [API_BASE]);
+  }, []);
+  // }, [API_BASE]);
 
   function resetRun() {
     setErrorMsg("");
@@ -197,7 +199,9 @@ export default function Page() {
       top_k_sources: String(topKSources),
     });
 
-    const url = `${API_BASE}/api/ask/stream?${params.toString()}`;
+    // const url = `${API_BASE}/api/ask/stream?${params.toString()}`;
+    const url = `/api/ask/stream?${params.toString()}`;
+
 
     const es = new EventSource(url);
     eventSourceRef.current = es;
@@ -353,11 +357,14 @@ export default function Page() {
                   Backend API (hosted on Oracle Cloud):{" "}
                   <a
                     className="underline decoration-[rgb(var(--accent)/0.5)] underline-offset-2 hover:text-[rgb(var(--accent))]"
-                    href={`${API_BASE}/docs`}
+                    // href={`${API_BASE}/docs`}
+                    href={`/docs`}
                     target="_blank"
                     rel="noreferrer"
                   >
-                  {API_BASE}/docs
+                    /docs
+                  {/* {API_BASE}/docs */}
+                  
                 </a>
               </div>
             </div>
