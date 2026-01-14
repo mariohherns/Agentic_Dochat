@@ -526,6 +526,10 @@ export default function Page() {
                   )}
                 </ol>
               </div>
+              {/* Footer */}
+            <div className="mt-6 text-center text-xs text-[rgb(var(--fg)/0.55)]">
+              © 2026 Mario Hernandez · Multi-Agent RAG Demo App
+            </div>
             </div>
           </section>
         </div>
