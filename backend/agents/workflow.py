@@ -54,7 +54,6 @@ class AgentWorkflow:
         decision = "relevant" if state["is_relevant"] else "irrelevant"
         print(f"[DEBUG] _decide_after_relevance_check -> {decision}")
         return decision
-        pass
 
     def _research_step(self, state: AgentState) -> Dict:
         print(f"[DEBUG] Entered _research_step with question='{state['question']}'")

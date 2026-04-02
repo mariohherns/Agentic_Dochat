@@ -3,7 +3,7 @@
 import logging
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
-from llm.openai_llm import OPENAI_API_KEY
+from llm.openai_llm import OPENAI_API_KEY, traceable
 
 logger = logging.getLogger(__name__)
 
@@ -21,24 +21,6 @@ class RelevanceChecker:
             max_completion_tokens=10,
             temperature=0,
         )
-
-    def _get_response_text(self, content: str | list | dict | None) -> str:
-        """Normalize API responses into a string for processing."""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, dict):
-            return str(content.get("content") or content.get("text") or "")
-        if isinstance(content, (list, tuple)):
-            parts = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict):
-                    parts.append(str(item.get("content") or item.get("text") or ""))
-                else:
-                    parts.append(str(item))
-            return " ".join(p for p in parts if p)
-        return str(content or "")
 
     def generate_prompt(self, question: str, document_content: str) -> str:
         """
@@ -62,6 +44,7 @@ class RelevanceChecker:
         """
         return prompt
 
+    @traceable(run_type="llm", name="RelevanceChecker.check")
     def check(self, question: str, retriever, k=3) -> str:
         """
         1. Retrieve the top-k document chunks from the global retriever.
@@ -93,17 +76,10 @@ class RelevanceChecker:
         # Call the LLM (ChatOpenAI returns an AIMessage)
         try:
             response = self.model.invoke([HumanMessage(content=prompt)])
+            llm_response = response.content.strip().upper().upper()  # type: ignore
+            logger.debug("LLM response: %s", llm_response)
         except (RuntimeError, ValueError, TypeError, OSError) as e:
             logger.error("Error during model inference: %s", e)
-            return "NO_MATCH"
-
-        # Extract the content from the response
-        try:
-            llm_response = self._get_response_text(response.content).strip().upper()
-            logger.debug("LLM response: %s", llm_response)
-
-        except (IndexError, KeyError) as e:
-            logger.error("Unexpected response structure: %s", e)
             return "NO_MATCH"
 
         print(f"Checker response: {llm_response}")

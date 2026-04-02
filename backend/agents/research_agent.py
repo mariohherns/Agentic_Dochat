@@ -5,7 +5,7 @@ from typing import Dict, List
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
-from llm.openai_llm import OPENAI_API_KEY
+from llm.openai_llm import OPENAI_API_KEY, traceable
 
 logger = logging.getLogger(__name__)
 
@@ -28,30 +28,6 @@ class ResearchAgent:
 
         print("ChatOpenAI LLM initialized successfully.")
 
-    def sanitize_response(self, response_text: str) -> str:
-        """
-        Sanitize the LLM's response by stripping unnecessary whitespace.
-        """
-        return response_text.strip()
-
-    def _get_response_text(self, content: str | list | dict | None) -> str:
-        """Normalize API responses into a string for processing."""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, dict):
-            return str(content.get("content") or content.get("text") or "")
-        if isinstance(content, (list, tuple)):
-            parts = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict):
-                    parts.append(str(item.get("content") or item.get("text") or ""))
-                else:
-                    parts.append(str(item))
-            return " ".join(p for p in parts if p)
-        return str(content or "")
-
     def generate_prompt(self, question: str, context: str) -> str:
         """
         Generate a structured prompt for the LLM to generate a precise and factual answer.
@@ -70,6 +46,7 @@ class ResearchAgent:
         """
         return prompt
 
+    @traceable(run_type="llm", name="ResearchAgent.generate")
     def generate(self, question: str, documents: List[Document]) -> Dict:
         """
         Generate an initial answer using the provided documents.
@@ -91,26 +68,11 @@ class ResearchAgent:
             print("Sending prompt to the model...")
             response = self.model.invoke([HumanMessage(content=prompt)])
             print("LLM response received.")
+            draft_answer = response.content.strip() or "I cannot answer this question based on the provide"  # type: ignore
+            logger.debug("LLM response: %s", draft_answer)
         except (RuntimeError, ValueError, TypeError, OSError) as e:
             print(f"Error during model inference: {e}")
             raise RuntimeError("Failed to generate answer due to a model error.") from e
 
-        # Extract and process the LLM's response
-        try:
-            llm_response = self._get_response_text(response.content).strip()
-            logger.debug("LLM response: %s", llm_response)
-
-        except (IndexError, KeyError) as e:
-            print(f"Unexpected response structure: {e}")
-            llm_response = (
-                "I cannot answer this question based on the provided documents."
-            )
-
-        # Sanitize the response
-        draft_answer = (
-            self.sanitize_response(llm_response)
-            if llm_response
-            else "I cannot answer this question based on the provided documents."
-        )
         print(f"Generated answer: {draft_answer}")
         return {"draft_answer": draft_answer, "context_used": context}

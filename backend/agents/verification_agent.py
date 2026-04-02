@@ -5,9 +5,17 @@ from typing import Any, Dict, List, Optional
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
-from llm.openai_llm import OPENAI_API_KEY
+from llm.openai_llm import OPENAI_API_KEY, traceable
 
 logger = logging.getLogger(__name__)
+
+_FALLBACK_REPORT = {
+    "Supported": "NO",
+    "Unsupported Claims": [],
+    "Contradictions": [],
+    "Relevant": "NO",
+    "Additional Details": "Invalid or empty response from the model.",
+}
 
 
 class VerificationAgent:
@@ -19,7 +27,7 @@ class VerificationAgent:
         """
 
         # Initialize the OpenAI Model llm
-        print("Initializing ResearchAgent with OPEN AI...")
+        logger.info("Initializing ResearchAgent with OPEN AI...")
 
         self.model = ChatOpenAI(
             model="gpt-4.1-mini",
@@ -27,30 +35,6 @@ class VerificationAgent:
             max_completion_tokens=40,  # Adjust based on desired response length
             temperature=0.0,  # Controls randomness; lower values make output more deterministic
         )
-
-    def sanitize_response(self, response_text: str) -> str:
-        """
-        Sanitize the LLM's response by stripping unnecessary whitespace.
-        """
-        return response_text.strip()
-
-    def _get_response_text(self, content: str | list | dict | None) -> str:
-        """Normalize API responses into a string for processing."""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, dict):
-            return str(content.get("content") or content.get("text") or "")
-        if isinstance(content, (list, tuple)):
-            parts = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict):
-                    parts.append(str(item.get("content") or item.get("text") or ""))
-                else:
-                    parts.append(str(item))
-            return " ".join(p for p in parts if p)
-        return str(content or "")
 
     def generate_prompt(self, answer: str, context: str) -> str:
         """
@@ -164,84 +148,48 @@ class VerificationAgent:
             report += "**Additional Details:** None\n"
         return report
 
+    @traceable(run_type="llm", name="VerificationAgent.check")
     def check(self, answer: str, documents: List[Document]) -> Dict[str, Any]:
-        """
-        Verify the answer against the provided documents.
-        """
-        print(
-            f"VerificationAgent.check called with answer='{answer}' and {len(documents)} documents."
+        """Verify the answer against the provided documents."""
+        logger.info(
+            "VerificationAgent.check called with answer='%s' and %d documents.",
+            answer,
+            len(documents),
         )
-        # Combine all document contents into one string without truncation
+
         context = "\n\n".join([doc.page_content for doc in documents])
-        print(f"Combined context length: {len(context)} characters.")
-        # Create a prompt for the LLM to verify the answer
+        logger.debug("Combined context length: %d characters.", len(context))
+
         prompt = self.generate_prompt(answer, context)
-        print("Prompt created for the LLM.")
-        # Call the LLM to generate the verification report
+        logger.debug("Prompt created for the LLM.")
+
         try:
-            print("Sending prompt to the model...")
+            logger.debug("Sending prompt to the model...")
             response = self.model.invoke([HumanMessage(content=prompt)])
-            print("LLM response received.")
+            logger.debug("LLM response received.")
+            llm_response = response.content.strip()  # type: ignore
+            logger.debug("Raw LLM response:\n%s", llm_response)
         except (RuntimeError, ValueError, TypeError, OSError) as e:
-            print(f"Error during model inference: {e}")
+            logger.error("Error during model inference: %s", e)
             raise RuntimeError("Failed to verify answer due to a model error.") from e
-        # Extract and process the LLM's response
-        try:
 
-            llm_response = self._get_response_text(response.content).strip()
-            print(f"Raw LLM response:\n{llm_response}")
-        except (AttributeError, TypeError) as e:
-            print(f"Unexpected response structure: {e}")
-
-            verification_report = {
-                "Supported": "NO",
-                "Unsupported Claims": [],
-                "Contradictions": [],
-                "Relevant": "NO",
-                "Additional Details": "Invalid response structure from the model.",
-            }
-            verification_report_formatted = self.format_verification_report(
-                verification_report
-            )
-            print(f"Verification report:\n{verification_report_formatted}")
-            print(f"Context used: {context}")
-            return {
-                "verification_report": verification_report_formatted,
-                "context_used": context,
-            }
-        # Sanitize the response
-        sanitized_response = (
-            self.sanitize_response(llm_response) if llm_response else ""
-        )
-        if not sanitized_response:
-            print("LLM returned an empty response.")
-            verification_report = {
-                "Supported": "NO",
-                "Unsupported Claims": [],
-                "Contradictions": [],
-                "Relevant": "NO",
-                "Additional Details": "Empty response from the model.",
-            }
+        if not llm_response:
+            logger.warning("LLM returned an empty response.")
+            verification_report = _FALLBACK_REPORT
         else:
-            # Parse the response into the expected format
-            verification_report = self.parse_verification_response(sanitized_response)
+            verification_report = self.parse_verification_response(llm_response)
             if verification_report is None:
-                print(
+                logger.warning(
                     "LLM did not respond with the expected format. Using default verification report."
                 )
-                verification_report = {
-                    "Supported": "NO",
-                    "Unsupported Claims": [],
-                    "Contradictions": [],
-                    "Relevant": "NO",
-                    "Additional Details": "Failed to parse the model's response.",
-                }
-        # Format the verification report into a paragraph
+                verification_report = _FALLBACK_REPORT
+
         verification_report_formatted = self.format_verification_report(
             verification_report
         )
-        print(f"Verification report:\n{verification_report_formatted}")
-        print(f"Context used: {context}")
+        logger.info("Verification report:\n%s", verification_report_formatted)
+        logger.debug("Context used: %s", context)
+
         return {
             "verification_report": verification_report_formatted,
             "context_used": context,
