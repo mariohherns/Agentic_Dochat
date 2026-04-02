@@ -1,3 +1,5 @@
+"""FastAPI application entrypoint for document question answering and streaming endpoints."""
+
 import os
 import json
 import time
@@ -34,7 +36,7 @@ _RETRIEVER_LOCK = threading.Lock()
 _APP_START_TS = time.time()
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     # --- startup ---
     EXAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     _load_builtin_docs()
@@ -76,17 +78,20 @@ workflow = AgentWorkflow()
 # Models
 # ----------------------------
 class AskRequest(BaseModel):
+    """Request payload for the ask endpoint."""
     question: str = Field(..., min_length=1, max_length=4000, description="User question")
     doc_id: str = Field(..., min_length=1, description="Selected built-in PDF (filename from /api/docs)")
     top_k_sources: int = Field(default=5, ge=0, le=50, description="How many source chunks to return")
 
 
 class SourceItem(BaseModel):
+    """Represents a source document chunk included in the response."""
     content: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AskResponse(BaseModel):
+    """Response model returned by the ask endpoint."""
     question: str
     is_relevant: Optional[bool] = None
     draft_answer: Optional[str] = None
@@ -98,6 +103,7 @@ class AskResponse(BaseModel):
 # ----------------------------
 @dataclass
 class LocalFile:
+    """Represents a local file used for document processing."""
     name: str
 
 
@@ -227,7 +233,7 @@ def ask(payload: AskRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/ask/stream")

@@ -1,16 +1,17 @@
+"""Research agent that generates answers from document content using ChatOpenAI."""
 
+import logging
 from typing import Dict, List
 from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI
-from config.settings import settings
-import json
-from llm.openai_llm import OPENAI_API_KEY
 from langchain_core.messages import HumanMessage
-import logging
+from langchain_openai import ChatOpenAI
+from llm.openai_llm import OPENAI_API_KEY
 
 logger = logging.getLogger(__name__)
 
 class ResearchAgent:
+    """Generate answers from document context using the ChatOpenAI model."""
+
     def __init__(self):
         """
         Initialize the research agent with the IBM WatsonX ModelInference.
@@ -20,7 +21,7 @@ class ResearchAgent:
         self.model = ChatOpenAI(
             model="gpt-4.1-mini",
             api_key=OPENAI_API_KEY,
-            max_tokens=80,   # Adjust based on desired response length
+            max_completion_tokens=80,   # Adjust based on desired response length
             temperature=0.2,   # Controls randomness; lower values make output more deterministic
         )
 
@@ -31,6 +32,24 @@ class ResearchAgent:
         Sanitize the LLM's response by stripping unnecessary whitespace.
         """
         return response_text.strip()
+
+    def _get_response_text(self, content: str | list | dict | None) -> str:
+        """Normalize API responses into a string for processing."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, dict):
+            return str(content.get("content") or content.get("text") or "")
+        if isinstance(content, (list, tuple)):
+            parts = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    parts.append(str(item.get("content") or item.get("text") or ""))
+                else:
+                    parts.append(str(item))
+            return " ".join(p for p in parts if p)
+        return str(content or "")
     
     def generate_prompt(self, question: str, context: str) -> str:
         """
@@ -69,14 +88,14 @@ class ResearchAgent:
             print("Sending prompt to the model...")
             response = self.model.invoke([HumanMessage(content=prompt)])
             print("LLM response received.")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError) as e:
             print(f"Error during model inference: {e}")
             raise RuntimeError("Failed to generate answer due to a model error.") from e
         
         # Extract and process the LLM's response
         try:
-            llm_response = (response.content or "").strip()
-            logger.debug(f"LLM response: {llm_response}")
+            llm_response = self._get_response_text(response.content).strip()
+            logger.debug("LLM response: %s", llm_response)
 
         except (IndexError, KeyError) as e:
             print(f"Unexpected response structure: {e}")

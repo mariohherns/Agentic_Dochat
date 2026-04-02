@@ -1,14 +1,18 @@
-from langchain_community.vectorstores import Chroma
+"""Retriever builder module for hybrid BM25 and vector retrieval construction."""
+
+import logging
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.retrievers import BM25Retriever
+from langchain_community.vectorstores import Chroma
 from langchain_classic.retrievers import EnsembleRetriever
 from config.settings import settings
 from llm.openai_llm import OPENAI_API_KEY
-import logging
 
 logger = logging.getLogger(__name__)
 
 class RetrieverBuilder:
+    """Build hybrid retrievers using BM25 and vector embedding search."""
+
     def __init__(self):
         self.embeddings = OpenAIEmbeddings(
             api_key=OPENAI_API_KEY,
@@ -30,7 +34,7 @@ class RetrieverBuilder:
                 persist_directory=settings.CHROMA_DB_PATH,
                 collection_name=collection,
             )
-            logger.info(f"Vector store ready (collection='{collection}').")
+            logger.info("Vector store ready (collection='%s').", collection)
 
             bm25 = BM25Retriever.from_documents(docs)
             logger.info("BM25 retriever created successfully.")
@@ -48,5 +52,5 @@ class RetrieverBuilder:
             return hybrid_retriever
 
         except Exception as e:
-            logger.error(f"Failed to build hybrid retriever: {e}")
+            logger.error("Failed to build hybrid retriever: %s", e)
             raise

@@ -1,15 +1,18 @@
-import json  # Import for JSON serialization
+"""Verification agent that checks generated answers against document context."""
+
+import logging
+from typing import Any, Dict, List, Optional
 from langchain_openai import ChatOpenAI
-from typing import Any, Dict, List
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from llm.openai_llm import OPENAI_API_KEY
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class VerificationAgent:
+    """Verify that generated answers are supported by the provided document context."""
+
     def __init__(self):
         """
         Initialize the verification agent with the Open AI.
@@ -21,7 +24,7 @@ class VerificationAgent:
         self.model = ChatOpenAI(
             model="gpt-4.1-mini",
             api_key=OPENAI_API_KEY,
-            max_tokens=40,   # Adjust based on desired response length
+            max_completion_tokens=40,   # Adjust based on desired response length
             temperature=0.0,   # Controls randomness; lower values make output more deterministic
         )
     def sanitize_response(self, response_text: str) -> str:
@@ -29,6 +32,24 @@ class VerificationAgent:
         Sanitize the LLM's response by stripping unnecessary whitespace.
         """
         return response_text.strip()
+
+    def _get_response_text(self, content: str | list | dict | None) -> str:
+        """Normalize API responses into a string for processing."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, dict):
+            return str(content.get("content") or content.get("text") or "")
+        if isinstance(content, (list, tuple)):
+            parts = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    parts.append(str(item.get("content") or item.get("text") or ""))
+                else:
+                    parts.append(str(item))
+            return " ".join(p for p in parts if p)
+        return str(content or "")
     
     def generate_prompt(self, answer: str, context: str) -> str:
         """
@@ -58,7 +79,7 @@ class VerificationAgent:
         """
         return prompt
     
-    def parse_verification_response(self, response_text: str) -> Dict:
+    def parse_verification_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """
         Parse the LLM's verification response into a structured dictionary.
         """
@@ -95,7 +116,7 @@ class VerificationAgent:
                     else:
                         verification[key] = "NO"
             return verification
-        except Exception as e:
+        except (AttributeError, TypeError, ValueError) as e:
             print(f"Error parsing verification response: {e}")
             return None
         
@@ -112,16 +133,16 @@ class VerificationAgent:
         if unsupported_claims:
             report += f"**Unsupported Claims:** {', '.join(unsupported_claims)}\n"
         else:
-            report += f"**Unsupported Claims:** None\n"
+            report += "**Unsupported Claims:** None\n"
         if contradictions:
             report += f"**Contradictions:** {', '.join(contradictions)}\n"
         else:
-            report += f"**Contradictions:** None\n"
+            report += "**Contradictions:** None\n"
         report += f"**Relevant:** {relevant}\n"
         if additional_details:
             report += f"**Additional Details:** {additional_details}\n"
         else:
-            report += f"**Additional Details:** None\n"
+            report += "**Additional Details:** None\n"
         return report
     
     def check(self, answer: str, documents: List[Document]) -> Dict[str, Any]:
@@ -140,15 +161,15 @@ class VerificationAgent:
             print("Sending prompt to the model...")
             response = self.model.invoke([HumanMessage(content=prompt)])
             print("LLM response received.")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError) as e:
             print(f"Error during model inference: {e}")
             raise RuntimeError("Failed to verify answer due to a model error.") from e
         # Extract and process the LLM's response
         try:
 
-            llm_response = (response.content or "").strip()
+            llm_response = self._get_response_text(response.content).strip()
             print(f"Raw LLM response:\n{llm_response}")
-        except Exception as e:
+        except (AttributeError, TypeError) as e:
             print(f"Unexpected response structure: {e}")
 
 

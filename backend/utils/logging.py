@@ -1,3 +1,5 @@
+"""Configure application logging using Loguru."""
+
 from loguru import logger
 
 logger.add(
