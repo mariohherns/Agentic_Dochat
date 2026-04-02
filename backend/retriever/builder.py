@@ -10,6 +10,7 @@ from llm.openai_llm import OPENAI_API_KEY
 
 logger = logging.getLogger(__name__)
 
+
 class RetrieverBuilder:
     """Build hybrid retrievers using BM25 and vector embedding search."""
 

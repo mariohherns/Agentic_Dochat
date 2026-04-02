@@ -9,6 +9,7 @@ from llm.openai_llm import OPENAI_API_KEY
 
 logger = logging.getLogger(__name__)
 
+
 class ResearchAgent:
     """Generate answers from document context using the ChatOpenAI model."""
 
@@ -21,8 +22,8 @@ class ResearchAgent:
         self.model = ChatOpenAI(
             model="gpt-4.1-mini",
             api_key=OPENAI_API_KEY,
-            max_completion_tokens=80,   # Adjust based on desired response length
-            temperature=0.2,   # Controls randomness; lower values make output more deterministic
+            max_completion_tokens=80,  # Adjust based on desired response length
+            temperature=0.2,  # Controls randomness; lower values make output more deterministic
         )
 
         print("ChatOpenAI LLM initialized successfully.")
@@ -50,7 +51,7 @@ class ResearchAgent:
                     parts.append(str(item))
             return " ".join(p for p in parts if p)
         return str(content or "")
-    
+
     def generate_prompt(self, question: str, context: str) -> str:
         """
         Generate a structured prompt for the LLM to generate a precise and factual answer.
@@ -68,21 +69,23 @@ class ResearchAgent:
         **Provide your answer below:**
         """
         return prompt
-    
+
     def generate(self, question: str, documents: List[Document]) -> Dict:
         """
         Generate an initial answer using the provided documents.
         """
-        print(f"ResearchAgent.generate called with question='{question}' and {len(documents)} documents.")
+        print(
+            f"ResearchAgent.generate called with question='{question}' and {len(documents)} documents."
+        )
         # Combine the top document contents into one string
         context = "\n\n".join([doc.page_content for doc in documents])
         print(f"Combined context length: {len(context)} characters.")
-        
+
         # Create a prompt for the LLM
         prompt = self.generate_prompt(question, context)
-        
+
         print("Prompt created for the LLM.")
-        
+
         # Call the LLM to generate the answer
         try:
             print("Sending prompt to the model...")
@@ -91,7 +94,7 @@ class ResearchAgent:
         except (RuntimeError, ValueError, TypeError, OSError) as e:
             print(f"Error during model inference: {e}")
             raise RuntimeError("Failed to generate answer due to a model error.") from e
-        
+
         # Extract and process the LLM's response
         try:
             llm_response = self._get_response_text(response.content).strip()
@@ -99,12 +102,15 @@ class ResearchAgent:
 
         except (IndexError, KeyError) as e:
             print(f"Unexpected response structure: {e}")
-            llm_response = "I cannot answer this question based on the provided documents."
-        
+            llm_response = (
+                "I cannot answer this question based on the provided documents."
+            )
+
         # Sanitize the response
-        draft_answer = self.sanitize_response(llm_response) if llm_response else "I cannot answer this question based on the provided documents."
+        draft_answer = (
+            self.sanitize_response(llm_response)
+            if llm_response
+            else "I cannot answer this question based on the provided documents."
+        )
         print(f"Generated answer: {draft_answer}")
-        return {
-            "draft_answer": draft_answer,
-            "context_used": context
-        }
+        return {"draft_answer": draft_answer, "context_used": context}

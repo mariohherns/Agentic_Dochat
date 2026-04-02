@@ -26,14 +26,15 @@ from agents.workflow import AgentWorkflow
 EXAMPLES_DIR = Path("examples")
 
 _DOC_IDS: List[str] = []
-_DOC_PATHS: Dict[str, str] = {}              # doc_id -> absolute path
-_RETRIEVER_BY_DOC: Dict[str, Any] = {}       # doc_id -> retriever
-_DOC_FP: Dict[str, str] = {}                 # doc_id -> fingerprint (mtime+size path)
+_DOC_PATHS: Dict[str, str] = {}  # doc_id -> absolute path
+_RETRIEVER_BY_DOC: Dict[str, Any] = {}  # doc_id -> retriever
+_DOC_FP: Dict[str, str] = {}  # doc_id -> fingerprint (mtime+size path)
 
 # Prevent duplicate retriever builds under concurrent traffic
 _RETRIEVER_LOCK = threading.Lock()
 
 _APP_START_TS = time.time()
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -44,6 +45,7 @@ async def lifespan(_app: FastAPI):
     # --- shutdown ---
     # optional cleanup:
     # _RETRIEVER_BY_DOC.clear()
+
 
 # ----------------------------
 # App + CORS
@@ -74,29 +76,40 @@ processor = DocumentProcessor()
 retriever_builder = RetrieverBuilder()
 workflow = AgentWorkflow()
 
+
 # ----------------------------
 # Models
 # ----------------------------
 class AskRequest(BaseModel):
     """Request payload for the ask endpoint."""
-    question: str = Field(..., min_length=1, max_length=4000, description="User question")
-    doc_id: str = Field(..., min_length=1, description="Selected built-in PDF (filename from /api/docs)")
-    top_k_sources: int = Field(default=5, ge=0, le=50, description="How many source chunks to return")
+
+    question: str = Field(
+        ..., min_length=1, max_length=4000, description="User question"
+    )
+    doc_id: str = Field(
+        ..., min_length=1, description="Selected built-in PDF (filename from /api/docs)"
+    )
+    top_k_sources: int = Field(
+        default=5, ge=0, le=50, description="How many source chunks to return"
+    )
 
 
 class SourceItem(BaseModel):
     """Represents a source document chunk included in the response."""
+
     content: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AskResponse(BaseModel):
     """Response model returned by the ask endpoint."""
+
     question: str
     is_relevant: Optional[bool] = None
     draft_answer: Optional[str] = None
     verification_report: Optional[str] = None
     sources: List[SourceItem] = Field(default_factory=list)
+
 
 # ----------------------------
 # Helpers
@@ -104,6 +117,7 @@ class AskResponse(BaseModel):
 @dataclass
 class LocalFile:
     """Represents a local file used for document processing."""
+
     name: str
 
 
@@ -174,11 +188,14 @@ def _ensure_doc_retriever(doc_id: str):
             c.metadata.update({"doc_id": doc_id, "source": doc_id})
 
         # Keep your collection naming
-        retriever = retriever_builder.build_hybrid_retriever(chunks, collection_name=doc_id)
+        retriever = retriever_builder.build_hybrid_retriever(
+            chunks, collection_name=doc_id
+        )
 
         _RETRIEVER_BY_DOC[doc_id] = retriever
         _DOC_FP[doc_id] = fp
         return retriever
+
 
 # ----------------------------
 # Routes
@@ -307,7 +324,11 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
             "done",
             summary="Draft created",
             ms=int((time.perf_counter() - t_pipe) * 1000),
-            preview=(draft[:220] + "…") if isinstance(draft, str) and len(draft) > 220 else draft,
+            preview=(
+                (draft[:220] + "…")
+                if isinstance(draft, str) and len(draft) > 220
+                else draft
+            ),
         )
 
         yield await emit(

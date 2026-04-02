@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 class AgentState(TypedDict):
     """Typed dictionary representing the state carried through the agent workflow."""
+
     question: str
     documents: List[Document]
     draft_answer: str
@@ -114,7 +115,9 @@ class AgentWorkflow:
         try:
             print(f"[DEBUG] Starting full_pipeline with question='{question}'")
             documents = retriever.invoke(question)
-            logger.info("Retrieved %d relevant documents (from .invoke)", len(documents))
+            logger.info(
+                "Retrieved %d relevant documents (from .invoke)", len(documents)
+            )
             initial_state = AgentState(
                 question=question,
                 documents=documents,
@@ -125,12 +128,11 @@ class AgentWorkflow:
             )
 
             final_state = self.compiled_workflow.invoke(initial_state)
-            
 
             return {
                 "draft_answer": final_state["draft_answer"],
                 "verification_report": final_state["verification_report"],
-                "documents": final_state["documents"]
+                "documents": final_state["documents"],
             }
         except (RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error("Workflow execution failed: %s", e)

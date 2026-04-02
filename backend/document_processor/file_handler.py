@@ -15,12 +15,13 @@ from utils.logging import logger
 
 class DocumentProcessor:
     """
-     - Validating file sizes before processing
-     - Using caching to avoid redundant processing of previously uploaded files
-     - Extracting structured content from documents using Docling
-     - Splitting text into chunks using MarkdownHeaderTextSplitter for better retrieval in vector databasesr
+    - Validating file sizes before processing
+    - Using caching to avoid redundant processing of previously uploaded files
+    - Extracting structured content from documents using Docling
+    - Splitting text into chunks using MarkdownHeaderTextSplitter for better retrieval in vector databasesr
     """
-    #Initializes cache directory and header settings.
+
+    # Initializes cache directory and header settings.
     def __init__(self):
         self.headers = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
         self.cache_dir = Path(settings.CACHE_DIR)
