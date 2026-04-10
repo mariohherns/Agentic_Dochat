@@ -68,7 +68,7 @@ class DocumentProcessor:
                         seen_hashes.add(chunk_hash)
 
             except Exception as e:
-                logger.error("Failed to process %s: %s", file.name, str(e))
+                logger.exception(f"Failed to process {file.name}: {e}")
                 continue
 
         logger.info("Total unique chunks: %d", len(all_chunks))
