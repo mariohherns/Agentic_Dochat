@@ -1,18 +1,20 @@
-from langgraph.graph import StateGraph, END
+"""Orchestrate the agent workflow for relevance checking, research, and verification."""
+
+import logging
 from typing import TypedDict, List, Dict
+from langchain_classic.retrievers import EnsembleRetriever
+from langchain_core.documents import Document
+from langgraph.graph import StateGraph, END
 from .research_agent import ResearchAgent
 from .verification_agent import VerificationAgent
 from .relevance_checker import RelevanceChecker
-from langchain_classic.retrievers import EnsembleRetriever
-from langchain_core.documents import Document
-
-
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class AgentState(TypedDict):
+    """Typed dictionary representing the state carried through the agent workflow."""
+
     question: str
     documents: List[Document]
     draft_answer: str
@@ -22,6 +24,8 @@ class AgentState(TypedDict):
 
 
 class AgentWorkflow:
+    """Manage the full agent workflow for relevance checking, research, and verification."""
+
     def __init__(self):
         self.researcher = ResearchAgent()
         self.verifier = VerificationAgent()
@@ -50,7 +54,6 @@ class AgentWorkflow:
         decision = "relevant" if state["is_relevant"] else "irrelevant"
         print(f"[DEBUG] _decide_after_relevance_check -> {decision}")
         return decision
-        pass
 
     def _research_step(self, state: AgentState) -> Dict:
         print(f"[DEBUG] Entered _research_step with question='{state['question']}'")
@@ -111,7 +114,9 @@ class AgentWorkflow:
         try:
             print(f"[DEBUG] Starting full_pipeline with question='{question}'")
             documents = retriever.invoke(question)
-            logger.info(f"Retrieved {len(documents)} relevant documents (from .invoke)")
+            logger.info(
+                "Retrieved %d relevant documents (from .invoke)", len(documents)
+            )
             initial_state = AgentState(
                 question=question,
                 documents=documents,
@@ -122,13 +127,12 @@ class AgentWorkflow:
             )
 
             final_state = self.compiled_workflow.invoke(initial_state)
-            
 
             return {
                 "draft_answer": final_state["draft_answer"],
                 "verification_report": final_state["verification_report"],
-                "documents": final_state["documents"]
+                "documents": final_state["documents"],
             }
-        except Exception as e:
-            logger.error(f"Workflow execution failed: {e}")
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
+            logger.error("Workflow execution failed: %s", e)
             raise

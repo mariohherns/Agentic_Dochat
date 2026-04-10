@@ -1,23 +1,24 @@
-import json  # Import for JSON serialization
-from langchain_openai import ChatOpenAI
-from typing import Dict, List
-from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
-from llm.openai_llm import OPENAI_API_KEY
+"""Relevance checker agent that validates whether document content matches the user's question."""
+
 import logging
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+from llm.openai_llm import OPENAI_API_KEY, traceable
 
 logger = logging.getLogger(__name__)
 
 
 class RelevanceChecker:
+    """Classify whether retrieved document content is relevant to the user's question."""
+
     def __init__(self):
         # Initialize the OpenAI Model llm
         print("Initializing RelevanceChecker with OPEN AI...")
-        
+
         self.model = ChatOpenAI(
             model="gpt-4.1-mini",
             api_key=OPENAI_API_KEY,
-            max_tokens=10,
+            max_completion_tokens=10,
             temperature=0,
         )
 
@@ -43,6 +44,7 @@ class RelevanceChecker:
         """
         return prompt
 
+    @traceable(run_type="llm", name="RelevanceChecker.check")
     def check(self, question: str, retriever, k=3) -> str:
         """
         1. Retrieve the top-k document chunks from the global retriever.
@@ -51,12 +53,14 @@ class RelevanceChecker:
         Returns: "CAN_ANSWER", "PARTIAL", or "NO_MATCH".
         """
         logger.debug(
-            f"RelevanceChecker.check called with question='{question}' and k={k}"
+            "RelevanceChecker.check called with question=%s and k=%s",
+            question,
+            k,
         )
-        
+
         # Retrieve doc chunks from the ensemble retriever
         top_docs = retriever.invoke(question)
-        
+
         if not top_docs:
             logger.debug(
                 "No documents returned from retriever.invoke(). Classifying as NO_MATCH."
@@ -65,24 +69,17 @@ class RelevanceChecker:
 
         # Combine the top k chunk texts into one string
         document_content = "\n\n".join(doc.page_content for doc in top_docs[:k])
-        
+
         # Create a prompt for the LLM
         prompt = self.generate_prompt(question, document_content)
 
         # Call the LLM (ChatOpenAI returns an AIMessage)
         try:
             response = self.model.invoke([HumanMessage(content=prompt)])
-        except Exception as e:
-            logger.error(f"Error during model inference: {e}")
-            return "NO_MATCH"
-
-        # Extract the content from the response
-        try:
-            llm_response = (response.content or "").strip().upper()
-            logger.debug(f"LLM response: {llm_response}")
-
-        except (IndexError, KeyError) as e:
-            logger.error(f"Unexpected response structure: {e}")
+            llm_response = response.content.strip().upper().upper()  # type: ignore
+            logger.debug("LLM response: %s", llm_response)
+        except (RuntimeError, ValueError, TypeError, OSError) as e:
+            logger.error("Error during model inference: %s", e)
             return "NO_MATCH"
 
         print(f"Checker response: {llm_response}")
@@ -93,7 +90,7 @@ class RelevanceChecker:
             logger.debug("LLM did not respond with a valid label. Forcing 'NO_MATCH'.")
             classification = "NO_MATCH"
         else:
-            logger.debug(f"Classification recognized as '{llm_response}'.")
+            logger.debug("Classification recognized as '%s'.", llm_response)
             classification = llm_response
 
         return classification

@@ -1,8 +1,11 @@
+"""Application settings configuration for environment-aware deployment."""
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from .constants import MAX_FILE_SIZE, MAX_TOTAL_SIZE, ALLOWED_TYPES
+from config.constants import MAX_FILE_SIZE, MAX_TOTAL_SIZE, ALLOWED_TYPES
+
 
 class Settings(BaseSettings):
-    
+    """Application settings loaded from environment and default constants."""
 
     # Optional settings with defaults
     MAX_FILE_SIZE: int = MAX_FILE_SIZE
@@ -27,7 +30,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="allow",   # ← allow OpenAI / IBM / Gemini keys
+        extra="allow",  # ← allow OpenAI / IBM / Gemini keys
     )
+
 
 settings = Settings()

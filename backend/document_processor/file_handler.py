@@ -1,3 +1,5 @@
+"""Document processing utilities for file validation, caching, conversion, and chunking."""
+
 import os
 import hashlib
 import pickle
@@ -13,12 +15,13 @@ from utils.logging import logger
 
 class DocumentProcessor:
     """
-     - Validating file sizes before processing
-     - Using caching to avoid redundant processing of previously uploaded files
-     - Extracting structured content from documents using Docling
-     - Splitting text into chunks using MarkdownHeaderTextSplitter for better retrieval in vector databasesr
+    - Validating file sizes before processing
+    - Using caching to avoid redundant processing of previously uploaded files
+    - Extracting structured content from documents using Docling
+    - Splitting text into chunks using MarkdownHeaderTextSplitter for better retrieval in vector databasesr
     """
-    #Initializes cache directory and header settings.
+
+    # Initializes cache directory and header settings.
     def __init__(self):
         self.headers = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
         self.cache_dir = Path(settings.CACHE_DIR)
@@ -50,10 +53,10 @@ class DocumentProcessor:
                 cache_path = self.cache_dir / f"{file_hash}.pkl"
 
                 if self._is_cache_valid(cache_path):
-                    logger.info(f"Loading from cache: {file.name}")
+                    logger.info("Loading from cache: %s", file.name)
                     chunks = self._load_from_cache(cache_path)
                 else:
-                    logger.info(f"Processing and caching: {file.name}")
+                    logger.info("Processing and caching: %s", file.name)
                     chunks = self._process_file(file)
                     self._save_to_cache(chunks, cache_path)
 
@@ -65,10 +68,10 @@ class DocumentProcessor:
                         seen_hashes.add(chunk_hash)
 
             except Exception as e:
-                logger.error(f"Failed to process {file.name}: {str(e)}")
+                logger.error("Failed to process %s: %s", file.name, str(e))
                 continue
 
-        logger.info(f"Total unique chunks: {len(all_chunks)}")
+        logger.info("Total unique chunks: %d", len(all_chunks))
         return all_chunks
 
     # Converts a document into Markdown and splits it into chunks.
@@ -76,7 +79,7 @@ class DocumentProcessor:
         """Original processing logic with Docling"""
 
         if not file.name.endswith((".pdf", ".docx", ".txt", ".md")):
-            logger.warning(f"Skipping unsupported file type: {file.name}")
+            logger.warning("Skipping unsupported file type: %s", file.name)
             return []
 
         converter = DocumentConverter()

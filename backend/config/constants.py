@@ -1,3 +1,5 @@
+"""Application constants for upload file limits and allowed file types."""
+
 # Maximum allowed size for a single file (50 MB)
 MAX_FILE_SIZE: int = 50 * 1024 * 1024
 

@@ -1,3 +1,5 @@
+"""FastAPI application entrypoint for document question answering and streaming endpoints."""
+
 import os
 import json
 import time
@@ -17,6 +19,8 @@ from pydantic import BaseModel, Field
 from document_processor.file_handler import DocumentProcessor
 from retriever.builder import RetrieverBuilder
 from agents.workflow import AgentWorkflow
+from langchain_core.tracers.context import tracing_v2_enabled
+import uvicorn
 
 # ----------------------------
 # Built-in docs (dropdown-only mode)
@@ -24,17 +28,18 @@ from agents.workflow import AgentWorkflow
 EXAMPLES_DIR = Path("examples")
 
 _DOC_IDS: List[str] = []
-_DOC_PATHS: Dict[str, str] = {}              # doc_id -> absolute path
-_RETRIEVER_BY_DOC: Dict[str, Any] = {}       # doc_id -> retriever
-_DOC_FP: Dict[str, str] = {}                 # doc_id -> fingerprint (mtime+size path)
+_DOC_PATHS: Dict[str, str] = {}  # doc_id -> absolute path
+_RETRIEVER_BY_DOC: Dict[str, Any] = {}  # doc_id -> retriever
+_DOC_FP: Dict[str, str] = {}  # doc_id -> fingerprint (mtime+size path)
 
 # Prevent duplicate retriever builds under concurrent traffic
 _RETRIEVER_LOCK = threading.Lock()
 
 _APP_START_TS = time.time()
 
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     # --- startup ---
     EXAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     _load_builtin_docs()
@@ -42,6 +47,7 @@ async def lifespan(app: FastAPI):
     # --- shutdown ---
     # optional cleanup:
     # _RETRIEVER_BY_DOC.clear()
+
 
 # ----------------------------
 # App + CORS
@@ -72,32 +78,49 @@ processor = DocumentProcessor()
 retriever_builder = RetrieverBuilder()
 workflow = AgentWorkflow()
 
+
 # ----------------------------
 # Models
 # ----------------------------
 class AskRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=4000, description="User question")
-    doc_id: str = Field(..., min_length=1, description="Selected built-in PDF (filename from /api/docs)")
-    top_k_sources: int = Field(default=5, ge=0, le=50, description="How many source chunks to return")
+    """Request payload for the ask endpoint."""
+
+    question: str = Field(
+        ..., min_length=1, max_length=4000, description="User question"
+    )
+    doc_id: str = Field(
+        ..., min_length=1, description="Selected built-in PDF (filename from /api/docs)"
+    )
+    top_k_sources: int = Field(
+        default=5, ge=0, le=50, description="How many source chunks to return"
+    )
 
 
 class SourceItem(BaseModel):
+    """Represents a source document chunk included in the response."""
+
     content: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AskResponse(BaseModel):
+    """Response model returned by the ask endpoint."""
+
     question: str
     is_relevant: Optional[bool] = None
     draft_answer: Optional[str] = None
     verification_report: Optional[str] = None
     sources: List[SourceItem] = Field(default_factory=list)
+    trace_url: Optional[str] = None
+
 
 # ----------------------------
 # Helpers
 # ----------------------------
 @dataclass
 class LocalFile:
+    """Represents a local file used for document processing."""
+
     name: str
 
 
@@ -168,11 +191,14 @@ def _ensure_doc_retriever(doc_id: str):
             c.metadata.update({"doc_id": doc_id, "source": doc_id})
 
         # Keep your collection naming
-        retriever = retriever_builder.build_hybrid_retriever(chunks, collection_name=doc_id)
+        retriever = retriever_builder.build_hybrid_retriever(
+            chunks, collection_name=doc_id
+        )
 
         _RETRIEVER_BY_DOC[doc_id] = retriever
         _DOC_FP[doc_id] = fp
         return retriever
+
 
 # ----------------------------
 # Routes
@@ -205,7 +231,10 @@ def ask(payload: AskRequest):
 
     try:
         retriever = _ensure_doc_retriever(doc_id)
-        state = workflow.full_pipeline(question=question, retriever=retriever)
+
+        with tracing_v2_enabled(project_name="default") as cb:
+            state = workflow.full_pipeline(question=question, retriever=retriever)
+            trace_url = str(cb.get_run_url()) if cb.get_run_url() else None
 
         docs = state.get("documents") or []
         sources = [
@@ -222,12 +251,13 @@ def ask(payload: AskRequest):
             draft_answer=state.get("draft_answer"),
             verification_report=state.get("verification_report"),
             sources=sources,
+            trace_url=trace_url,
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/ask/stream")
@@ -281,7 +311,15 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
 
         t_pipe = time.perf_counter()
         try:
-            state = await asyncio.to_thread(workflow.full_pipeline, question, retriever)
+
+            def run_traced_pipeline():
+                with tracing_v2_enabled(project_name="default") as cb:
+                    result = workflow.full_pipeline(question, retriever)
+                    trace_url = str(cb.get_run_url()) if cb.get_run_url() else None
+                    return result, trace_url
+
+            state, trace_url = await asyncio.to_thread(run_traced_pipeline)
+
         except Exception as e:
             yield await emit("research", "error", summary="Pipeline failed")
             yield {"event": "final", "data": json.dumps({"error": str(e)})}
@@ -301,7 +339,11 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
             "done",
             summary="Draft created",
             ms=int((time.perf_counter() - t_pipe) * 1000),
-            preview=(draft[:220] + "…") if isinstance(draft, str) and len(draft) > 220 else draft,
+            preview=(
+                (draft[:220] + "…")
+                if isinstance(draft, str) and len(draft) > 220
+                else draft
+            ),
         )
 
         yield await emit(
@@ -320,6 +362,7 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
                     "verification_report": verification,
                     "is_relevant": state.get("is_relevant"),
                     "sources": sources,
+                    "trace_url": trace_url,
                 }
             ),
         }
@@ -331,3 +374,6 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
             "X-Accel-Buffering": "no",
         },
     )
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True, log_level="info")

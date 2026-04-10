@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import CheckIcon from "@/components/icons/CheckIcon";
+import LangSmithIcon from "@/components/icons/LangSmithIcon";
+import { MarkdownBlock, formatAsList } from "@/components/ui/MarkdownBlock";
 
 /**
  * Updated for built-in dropdown docs (no file paths).
@@ -29,6 +32,7 @@ type FinalPayload = {
   draft_answer?: string | null;
   verification_report?: string | null;
   sources?: SourceItem[];
+  trace_url?: string | null;
   error?: string;
 };
 
@@ -103,6 +107,7 @@ export default function Page() {
   // NEW: built-in docs dropdown
   const [docs, setDocs] = useState<string[]>([]);
   const [docId, setDocId] = useState<string>("");
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const [events, setEvents] = useState<Record<AgentName, AgentEvent>>(() => ({
     relevance: { agent: "relevance", status: "idle" },
@@ -148,6 +153,7 @@ export default function Page() {
   function resetRun() {
     setErrorMsg("");
     setFinalResult(null);
+    setCopiedKey(null);
     setEvents({
       relevance: { agent: "relevance", status: "idle" },
       retrieval: { agent: "retrieval", status: "idle" },
@@ -171,6 +177,16 @@ export default function Page() {
       // no-op
     }
   }
+
+  const handleCopy = async (key: string, text: string) => {
+    await copyToClipboard(text);
+    setCopiedKey(key);
+
+    setTimeout(() => {
+      setCopiedKey(null);
+    }, 2000);
+  };
+
 
   function startStream() {
     resetRun();
@@ -354,17 +370,17 @@ export default function Page() {
               )}
 
               <div className="mt-4 text-xs text-[rgb(var(--fg)/0.65)]">
-                  Backend API (hosted on Oracle Cloud):{" "}
-                  <a
-                    className="underline decoration-[rgb(var(--accent)/0.5)] underline-offset-2 hover:text-[rgb(var(--accent))]"
-                    // href={`${API_BASE}/docs`}
-                    href={`/docs`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    /docs
+                Backend API (hosted on Oracle Cloud):{" "}
+                <a
+                  className="underline decoration-[rgb(var(--accent)/0.5)] underline-offset-2 hover:text-[rgb(var(--accent))]"
+                  // href={`${API_BASE}/docs`}
+                  href={`/docs`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  /docs
                   {/* {API_BASE}/docs */}
-                  
+
                 </a>
               </div>
             </div>
@@ -447,10 +463,14 @@ export default function Page() {
 
                 {finalResult?.draft_answer && (
                   <button
-                    onClick={() => copyToClipboard(finalResult.draft_answer || "")}
-                    className="rounded-md bg-[rgb(var(--card))] px-3 py-2 text-xs font-medium ring-1 ring-inset ring-[rgb(var(--border))] hover:bg-[rgb(var(--card-muted))]"
+                    onClick={() => handleCopy("answer", finalResult.draft_answer || "")}
+                    className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium ring-1 ring-inset transition-colors ${copiedKey === "answer"
+                      ? "bg-green-50 text-green-700 ring-green-200"
+                      : "bg-[rgb(var(--card))] ring-[rgb(var(--border))] hover:bg-[rgb(var(--card-muted))]"
+                      }`}
                   >
-                    Copy answer
+                    {copiedKey === "answer" && <CheckIcon />}
+                    {copiedKey === "answer" ? "Copied" : "Copy answer"}
                   </button>
                 )}
               </div>
@@ -465,15 +485,97 @@ export default function Page() {
                       {finalResult?.is_relevant === undefined || finalResult?.is_relevant === null
                         ? "—"
                         : finalResult.is_relevant
-                        ? "YES"
-                        : "NO"}
+                          ? "YES"
+                          : "NO"}
                     </span>
                   </div>
                 </div>
 
-                <pre className="mt-2 whitespace-pre-wrap text-sm text-[rgb(var(--fg)/0.9)]">
-                  {finalResult?.draft_answer || (isStreaming ? "Working..." : "No answer yet.")}
-                </pre>
+
+                <MarkdownBlock
+                  content={
+                    finalResult?.draft_answer
+                      ? finalResult.draft_answer
+                      : isStreaming
+                        ? "_Working..._"
+                        : "_No answer yet._"
+                  }
+                />
+              </div>
+
+              {/* LangSmith Trace */}
+              <div className="mt-4 rounded-lg bg-[rgb(var(--card))] p-4 ring-1 ring-inset ring-[rgb(var(--border))]">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-3">
+                      {/* Icon (no background) */}
+                      <LangSmithIcon active={!!finalResult?.trace_url} />
+
+                      <div>
+                        <h3
+                          className={`text-sm font-semibold transition-colors ${finalResult?.trace_url
+                            ? "text-[#3B82F6]" // match icon
+                            : "text-[rgb(var(--fg))]"
+                            }`}
+                        >
+                          LangSmith Trace
+                        </h3>
+
+                        <p className="mt-1 text-xs text-[rgb(var(--fg)/0.65)]">
+                          Open the trace to inspect agent steps, tool calls, retrieval results,
+                          latency, and full input/output flow for this run.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <span
+                        className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition-colors ${finalResult?.trace_url
+                          ? "bg-green-50 text-green-700 ring-green-200"
+                          : isStreaming
+                            ? "bg-[rgb(var(--card-muted))] text-[rgb(var(--fg)/0.75)] ring-[rgb(var(--border))]"
+                            : "bg-[rgb(var(--card-muted))] text-[rgb(var(--fg)/0.65)] ring-[rgb(var(--border))]"
+                          }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${finalResult?.trace_url
+                            ? "bg-green-500"
+                            : isStreaming
+                              ? "bg-[rgb(var(--fg)/0.45)]"
+                              : "bg-[rgb(var(--fg)/0.3)]"
+                            }`}
+                        />
+                        {finalResult?.trace_url ? "Trace Available" : isStreaming ? "Tracing..." : "No Trace Yet"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    {finalResult?.trace_url && (
+                      <>
+                        <button
+                          onClick={() => handleCopy("trace", finalResult.trace_url || "")}
+                          className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium ring-1 ring-inset transition-colors ${copiedKey === "trace"
+                            ? "bg-green-50 text-green-700 ring-green-200"
+                            : "bg-[rgb(var(--card))] ring-[rgb(var(--border))] hover:bg-[rgb(var(--card-muted))]"
+                            }`}
+                        >
+                          {copiedKey === "trace" && <CheckIcon />}
+                          {copiedKey === "trace" ? "Copied" : "Copy URL"}
+                        </button>
+
+                        <a
+                          href={finalResult.trace_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-md bg-[rgb(var(--accent))] px-3 py-2 text-xs font-medium text-white hover:opacity-95"
+                        >
+                          Open Trace
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Verification */}
@@ -482,16 +584,32 @@ export default function Page() {
                   <h3 className="text-sm font-semibold">Verification Report</h3>
                   {finalResult?.verification_report && (
                     <button
-                      onClick={() => copyToClipboard(finalResult.verification_report || "")}
-                      className="rounded-md bg-[rgb(var(--card-muted))] px-3 py-1.5 text-xs font-medium ring-1 ring-inset ring-[rgb(var(--border))] hover:opacity-90"
+                      onClick={() =>
+                        handleCopy("verification", finalResult.verification_report || "")
+                      }
+                      className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition-colors ${copiedKey === "verification"
+                        ? "bg-green-50 text-green-700 ring-green-200"
+                        : "bg-[rgb(var(--card))] ring-[rgb(var(--border))] hover:bg-[rgb(var(--card-muted))]"
+                        }`}
                     >
-                      Copy
+                      {copiedKey === "verification" && <CheckIcon />}
+                      {copiedKey === "verification" ? "Copied" : "Copy"}
                     </button>
                   )}
                 </div>
-                <pre className="mt-2 whitespace-pre-wrap text-sm text-[rgb(var(--fg)/0.9)]">
-                  {finalResult?.verification_report || (isStreaming ? "Verifying..." : "No report yet.")}
-                </pre>
+                <div className="mt-2 prose prose-sm max-w-none text-[rgb(var(--fg)/0.9)]">
+
+
+                  <MarkdownBlock
+                    content={
+                      finalResult?.verification_report
+                        ? formatAsList(finalResult.verification_report)
+                        : isStreaming
+                          ? "_Verifying..._"
+                          : "_No report yet._"
+                    }
+                  />
+                </div>
               </div>
 
               {/* Sources */}
@@ -525,18 +643,18 @@ export default function Page() {
                             </pre>
                           </details>
                         </div>
-                        <pre className="mt-2 whitespace-pre-wrap text-sm text-[rgb(var(--fg)/0.9)]">
-                          {s.content}
-                        </pre>
+                        <div className="mt-2 prose prose-sm max-w-none text-[rgb(var(--fg)/0.9)]">
+                          <MarkdownBlock content={s.content} />
+                        </div>
                       </li>
                     ))
                   )}
                 </ol>
               </div>
               {/* Footer */}
-            <div className="mt-6 text-center text-xs text-[rgb(var(--fg)/0.55)]">
-              © 2026 Mario Hernandez · Multi-Agent RAG Demo App
-            </div>
+              <div className="mt-6 text-center text-xs text-[rgb(var(--fg)/0.55)]">
+                © 2026 Mario Hernandez · Multi-Agent RAG Demo App
+              </div>
             </div>
           </section>
         </div>
