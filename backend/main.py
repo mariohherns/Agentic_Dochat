@@ -19,6 +19,8 @@ from pydantic import BaseModel, Field
 from document_processor.file_handler import DocumentProcessor
 from retriever.builder import RetrieverBuilder
 from agents.workflow import AgentWorkflow
+from langchain_core.tracers.context import tracing_v2_enabled
+import uvicorn
 
 # ----------------------------
 # Built-in docs (dropdown-only mode)
@@ -109,6 +111,7 @@ class AskResponse(BaseModel):
     draft_answer: Optional[str] = None
     verification_report: Optional[str] = None
     sources: List[SourceItem] = Field(default_factory=list)
+    trace_url: Optional[str] = None
 
 
 # ----------------------------
@@ -228,7 +231,10 @@ def ask(payload: AskRequest):
 
     try:
         retriever = _ensure_doc_retriever(doc_id)
-        state = workflow.full_pipeline(question=question, retriever=retriever)
+
+        with tracing_v2_enabled(project_name="default") as cb:
+            state = workflow.full_pipeline(question=question, retriever=retriever)
+            trace_url = str(cb.get_run_url()) if cb.get_run_url() else None
 
         docs = state.get("documents") or []
         sources = [
@@ -245,6 +251,7 @@ def ask(payload: AskRequest):
             draft_answer=state.get("draft_answer"),
             verification_report=state.get("verification_report"),
             sources=sources,
+            trace_url=trace_url,
         )
 
     except HTTPException:
@@ -304,7 +311,15 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
 
         t_pipe = time.perf_counter()
         try:
-            state = await asyncio.to_thread(workflow.full_pipeline, question, retriever)
+
+            def run_traced_pipeline():
+                with tracing_v2_enabled(project_name="default") as cb:
+                    result = workflow.full_pipeline(question, retriever)
+                    trace_url = str(cb.get_run_url()) if cb.get_run_url() else None
+                    return result, trace_url
+
+            state, trace_url = await asyncio.to_thread(run_traced_pipeline)
+
         except Exception as e:
             yield await emit("research", "error", summary="Pipeline failed")
             yield {"event": "final", "data": json.dumps({"error": str(e)})}
@@ -347,6 +362,7 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
                     "verification_report": verification,
                     "is_relevant": state.get("is_relevant"),
                     "sources": sources,
+                    "trace_url": trace_url,
                 }
             ),
         }
@@ -358,3 +374,6 @@ async def ask_stream(question: str, doc_id: str, top_k_sources: int = 5):
             "X-Accel-Buffering": "no",
         },
     )
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True, log_level="info")
